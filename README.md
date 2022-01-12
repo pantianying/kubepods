@@ -22,7 +22,7 @@ make
 .:53 {
     ready
     kubepods dian-stable.svc.cluster.local svc.cluster.local {
-       endpoint https://your-apiservice-url
+       endpoint https://your-APIServer-url
        kubeconfig ~/.kube/config
        # kubetoken xxxxxxxx
     }
