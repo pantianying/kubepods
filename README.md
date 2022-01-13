@@ -9,7 +9,7 @@ ln -s {kubepods_code_path} .
 cd ..
 vi plugin.cfg # add kubepods:kubepods
 go generate
-make
+make SYSTEM='GOOS=linux GOARCH=amd64'
 ```
 
 ## how to start coredns with this plugin
