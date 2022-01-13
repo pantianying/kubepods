@@ -7,7 +7,7 @@ import (
 
 const (
 	podIPIndex            = "PodIP"
-	svcNameNamespaceIndex = "NameNamespace"
+	svcNameNamespaceIndex = "SvcNameNamespace"
 	svcIPIndex            = "ServiceIP"
 	epNameNamespaceIndex  = "EndpointNameNamespace"
 	epIPIndex             = "EndpointsIP"
@@ -17,6 +17,14 @@ var errObj = errors.New("obj was not of the correct type")
 
 func epNameNamespaceIndexFunc(obj interface{}) ([]string, error) {
 	s, ok := obj.(*object.Endpoints)
+	if !ok {
+		return nil, errObj
+	}
+	return []string{s.Index}, nil
+}
+
+func svcNameNamespaceIndexFunc(obj interface{}) ([]string, error) {
+	s, ok := obj.(*object.Service)
 	if !ok {
 		return nil, errObj
 	}

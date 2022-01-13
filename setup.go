@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"strconv"
+	"time"
 )
 
 const pluginName = "kubepods"
@@ -88,6 +89,7 @@ func parseStanza(c *caddy.Controller) (*KubePods, error) {
 			if len(args) != 1 {
 				return nil, c.ArgErr()
 			}
+			log.Info("endpoint:", args[0])
 			kns.APIServer = args[0]
 		case "tls": // cert key ca
 			args := c.RemainingArgs()
@@ -201,15 +203,15 @@ func (k *KubePods) InitAPIConn(ctx context.Context) (onStart func() error, onShu
 		}
 		k.client = kubeClient
 	}
-	k.svcIndexer, k.svcController = cache.NewIndexerInformer(
+	k.svcIndex, k.svcController = object.NewIndexerInformer(
 		&cache.ListWatch{
 			ListFunc:  serviceListFunc(ctx, k.client, coreapi.NamespaceAll, nil),
 			WatchFunc: serviceWatchFunc(ctx, k.client, coreapi.NamespaceAll, nil),
 		},
 		&core.Service{},
-		0,
 		cache.ResourceEventHandlerFuncs{},
-		cache.Indexers{},
+		cache.Indexers{svcNameNamespaceIndex: svcNameNamespaceIndexFunc},
+		object.DefaultProcessor(object.ToService, nil),
 	)
 
 	k.endpointIndex, k.endpointController = object.NewIndexerInformer(
@@ -228,6 +230,16 @@ func (k *KubePods) InitAPIConn(ctx context.Context) (onStart func() error, onShu
 		go k.endpointController.Run(k.stopCh)
 		return nil
 	}
+
+	go func() {
+		for {
+			time.Sleep(3 * time.Second)
+			if k.Ready() {
+				break
+			}
+			log.Infof("wait for ready .....")
+		}
+	}()
 
 	onShut = func() error {
 		k.stopLock.Lock()

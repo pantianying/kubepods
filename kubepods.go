@@ -37,7 +37,7 @@ type KubePods struct {
 	// Kubernetes API interface
 	client        kubernetes.Interface
 	svcController cache.Controller
-	svcIndexer    cache.Indexer
+	svcIndex      cache.Indexer
 
 	endpointController cache.Controller
 	endpointIndex      cache.Indexer
@@ -74,6 +74,8 @@ func (k KubePods) Name() string { return pluginName }
 
 // Ready implements the ready.Readiness interface.
 func (k *KubePods) Ready() bool {
+	log.Info("svcController ", k.svcController.HasSynced())
+	log.Info("endpointController ", k.endpointController.HasSynced())
 	return k.svcController.HasSynced() && k.endpointController.HasSynced()
 }
 
@@ -98,69 +100,88 @@ func (k KubePods) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg
 	if zone == "." {
 		name = state.Name()[0 : len(qname)-len(zone)]
 	}
-	ss := strings.Split(state.Name(), ".")
+	ss := strings.Split(name, ".")
 	if len(ss) < 2 {
 		return dns.RcodeServerFailure, nil
 	}
 
-	epKey := object.EndpointsKey(name, ss[1])
+	epKey := object.EndpointsKey(ss[0], ss[1])
+	svcKey := object.ServiceKey(ss[0], ss[1])
 
-	log.Infof("zone:%v , epKey:%v , QType:%v", zone, epKey, state.QType())
+	log.Infof("zone:{%v} key:{%v} QType:{%v}", zone, name, state.QType())
 
-	// get the node by key name from the indexer
-	item, err := k.endpointIndex.ByIndex(epNameNamespaceIndex, epKey)
+	svcs, err := k.svcIndex.ByIndex(svcNameNamespaceIndex, svcKey)
 	if err != nil {
+		log.Warning("found svc err", err)
 		return dns.RcodeServerFailure, err
 	}
-	if len(item) == 0 {
-		if k.Fall.Through(state.Name()) {
-			return plugin.NextOrFailure(k.Name(), k.Next, ctx, w, r)
-		}
-		writeResponse(w, r, nil, nil, []dns.RR{k.soa()}, dns.RcodeNameError)
-		return dns.RcodeNameError, nil
+	if len(svcs) < 1 {
+		log.Warning("found no svc :", svcKey)
+		return dns.RcodeServerFailure, nil
 	}
-
-	// extract IPs from the node
+	if len(svcs) > 1 {
+		log.Warningf("found svc count > 1")
+		return dns.RcodeServerFailure, nil
+	}
+	svc := svcs[0].(*object.Service)
 	var ips []string
 
-	for _, o := range item {
-		e, ok := o.(*object.Endpoints)
-		if !ok {
-			continue
+	switch svc.Type {
+	case core.ServiceTypeClusterIP:
+		// get the node by key name from the indexer
+		item, err := k.endpointIndex.ByIndex(epNameNamespaceIndex, epKey)
+		if err != nil {
+			return dns.RcodeServerFailure, err
 		}
-		for _, eps := range e.Subsets {
-			for _, addr := range eps.Addresses {
-				ips = append(ips, addr.IP)
+		if len(item) == 0 {
+			if k.Fall.Through(state.Name()) {
+				return plugin.NextOrFailure(k.Name(), k.Next, ctx, w, r)
 			}
+			writeResponse(w, r, nil, nil, []dns.RR{k.soa()}, dns.RcodeNameError)
+			return dns.RcodeNameError, nil
 		}
-	}
-
-	// build response records
-	var records []dns.RR
-	if state.QType() == dns.TypeA {
-		for _, ip := range ips {
-			if strings.Contains(ip, ":") {
+		for _, o := range item {
+			e, ok := o.(*object.Endpoints)
+			if !ok {
 				continue
 			}
-			if netIP := net.ParseIP(ip); netIP != nil {
-				records = append(records, &dns.A{A: netIP,
-					Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: k.ttl}})
+			for _, eps := range e.Subsets {
+				for _, addr := range eps.Addresses {
+					ips = append(ips, addr.IP)
+				}
 			}
 		}
-	}
-	if state.QType() == dns.TypeAAAA {
-		for _, ip := range ips {
-			if !strings.Contains(ip, ":") {
-				continue
-			}
-			if netIP := net.ParseIP(ip); netIP != nil {
-				records = append(records, &dns.AAAA{AAAA: netIP,
-					Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: k.ttl}})
+
+		// build response records
+		var records []dns.RR
+		if state.QType() == dns.TypeA {
+			for _, ip := range ips {
+				if strings.Contains(ip, ":") {
+					continue
+				}
+				if netIP := net.ParseIP(ip); netIP != nil {
+					records = append(records, &dns.A{A: netIP,
+						Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: k.ttl}})
+				}
 			}
 		}
+		if state.QType() == dns.TypeAAAA {
+			for _, ip := range ips {
+				if !strings.Contains(ip, ":") {
+					continue
+				}
+				if netIP := net.ParseIP(ip); netIP != nil {
+					records = append(records, &dns.AAAA{AAAA: netIP,
+						Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: k.ttl}})
+				}
+			}
+		}
+		writeResponse(w, r, records, nil, nil, dns.RcodeSuccess)
+	default:
+		log.Infof("the type of service {%v} is not supported ", svc.Type)
+		return dns.RcodeServerFailure, nil
 	}
 
-	writeResponse(w, r, records, nil, nil, dns.RcodeSuccess)
 	return dns.RcodeSuccess, nil
 }
 
