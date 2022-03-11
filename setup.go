@@ -133,6 +133,12 @@ func parseStanza(c *caddy.Controller) (*KubePods, error) {
 				return nil, c.ArgErr()
 			}
 			kns.APIClientToken = args[0]
+		case "defaultnamespace":
+			args := c.RemainingArgs()
+			if len(args) == 0 {
+				return nil, c.ArgErr()
+			}
+			kns.DefaultDNSNamespace = args[0]
 		default:
 			return nil, c.Errf("unknown property '%s'", c.Val())
 		}

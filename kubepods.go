@@ -24,15 +24,16 @@ type KubePods struct {
 	Zones    []string
 	Upstream upstreamer
 
-	APIServer       string
-	APICertAuth     string
-	APIClientCert   string
-	APIClientKey    string
-	APIClientToken  string
-	ClientConfig    clientcmd.ClientConfig
-	Fall            fall.F
-	ttl             uint32
-	ipType, dnsType core.NodeAddressType
+	APIServer           string
+	APICertAuth         string
+	APIClientCert       string
+	APIClientKey        string
+	APIClientToken      string
+	ClientConfig        clientcmd.ClientConfig
+	Fall                fall.F
+	ttl                 uint32
+	DefaultDNSNamespace string
+	ipType, dnsType     core.NodeAddressType
 
 	// Kubernetes API interface
 	client        kubernetes.Interface
@@ -101,34 +102,54 @@ func (k KubePods) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg
 		name = state.Name()[0 : len(qname)-len(zone)]
 	}
 	ss := strings.Split(name, ".")
-	if len(ss) < 2 {
+	var svcName, svcNamespace string
+	if len(ss) == 2 {
+		svcName, svcNamespace = ss[0], ss[1]
+	} else if len(ss) == 1 {
+		svcName, svcNamespace = ss[0], k.DefaultDNSNamespace
+	} else {
+		log.Warning("err when get svcName/svcNamespace")
 		return dns.RcodeServerFailure, nil
 	}
 
-	epKey := object.EndpointsKey(ss[0], ss[1])
-	svcKey := object.ServiceKey(ss[0], ss[1])
-
-	log.Infof("zone:{%v} key:{%v} QType:{%v}", zone, name, state.QType())
-
+	svcKey := object.ServiceKey(svcName, svcNamespace)
 	svcs, err := k.svcIndex.ByIndex(svcNameNamespaceIndex, svcKey)
 	if err != nil {
 		log.Warning("found svc err", err)
 		return dns.RcodeServerFailure, err
 	}
+	// when no svc found , try DefaultDNSNamespace again
 	if len(svcs) < 1 {
-		log.Warning("found no svc :", svcKey)
-		return dns.RcodeServerFailure, nil
+		if svcNamespace != k.DefaultDNSNamespace {
+			svcKey = object.ServiceKey(svcName, k.DefaultDNSNamespace)
+			svcs, err = k.svcIndex.ByIndex(svcNameNamespaceIndex, svcKey)
+			if err != nil {
+				log.Warning("found svc err", err)
+				return dns.RcodeServerFailure, err
+			}
+			if len(svcs) < 1 {
+				log.Warning("found no svc :", svcKey)
+				return dns.RcodeServerFailure, nil
+			}
+			svcNamespace = k.DefaultDNSNamespace
+		} else {
+			log.Warning("found no svc :", svcKey)
+			return dns.RcodeServerFailure, nil
+		}
 	}
 	if len(svcs) > 1 {
 		log.Warningf("found svc count > 1")
 		return dns.RcodeServerFailure, nil
 	}
+	log.Infof("zone:{%v} key:{%v} svcNamespace:{%v} QType:{%v}", zone, name, svcNamespace, state.QType())
+
 	svc := svcs[0].(*object.Service)
 	var ips []string
 
 	switch svc.Type {
 	case core.ServiceTypeClusterIP:
 		// get the node by key name from the indexer
+		epKey := object.EndpointsKey(svcName, svcNamespace)
 		item, err := k.endpointIndex.ByIndex(epNameNamespaceIndex, epKey)
 		if err != nil {
 			return dns.RcodeServerFailure, err
