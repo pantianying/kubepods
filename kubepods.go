@@ -141,7 +141,6 @@ func (k KubePods) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg
 		log.Warningf("found svc count > 1")
 		return dns.RcodeServerFailure, nil
 	}
-	log.Infof("zone:{%v} key:{%v} svcNamespace:{%v} QType:{%v}", zone, name, svcNamespace, state.QType())
 
 	svc := svcs[0].(*object.Service)
 	var ips []string
@@ -197,6 +196,7 @@ func (k KubePods) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg
 				}
 			}
 		}
+		log.Infof("zone:{%v} key:{%v} svcNamespace:{%v} QType:{%v} , ip:[%v]", zone, name, svcNamespace, state.QType(), ips)
 		writeResponse(w, r, records, nil, nil, dns.RcodeSuccess)
 	default:
 		log.Infof("the type of service {%v} is not supported ", svc.Type)

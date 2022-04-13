@@ -78,7 +78,7 @@ func parse(c *caddy.Controller) (*KubePods, error) {
 // parseStanza parses a kubenodes stanza
 func parseStanza(c *caddy.Controller) (*KubePods, error) {
 	kns := New(plugin.OriginsFromArgsOrServerBlock(c.RemainingArgs(), c.ServerBlockKeys))
-
+	fmt.Println("kns new, zone", kns.Zones)
 	for c.NextBlock() {
 		switch c.Val() {
 		case "external":
