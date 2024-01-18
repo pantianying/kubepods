@@ -120,7 +120,7 @@ func (k KubePods) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg
 	}
 	// when no svc found , try DefaultDNSNamespace again
 	if len(svcs) < 1 {
-		if svcNamespace != k.DefaultDNSNamespace {
+		if svcNamespace != k.DefaultDNSNamespace && strings.HasPrefix(svcNamespace, "alter-") {
 			svcKey = object.ServiceKey(svcName, k.DefaultDNSNamespace)
 			svcs, err = k.svcIndex.ByIndex(svcNameNamespaceIndex, svcKey)
 			if err != nil {
